@@ -1,79 +1,65 @@
 """
-Downloads the loan spreadsheet from SharePoint using Microsoft credentials.
-Credentials are stored as GitHub Secrets — never in this file.
+Downloads the loan spreadsheet from SharePoint.
+Uses requests + Microsoft authentication.
 """
-import os, sys, re, subprocess
+import os, sys, subprocess
 
-subprocess.check_call([sys.executable, "-m", "pip", "install", "Office365-REST-Python-Client", "-q"])
-
-from office365.runtime.auth.user_credential import UserCredential
-from office365.sharepoint.client_context import ClientContext
+subprocess.check_call([sys.executable, "-m", "pip", "install", "requests", "-q"])
+import requests
 
 user = os.environ.get("SHAREPOINT_USER")
 pwd  = os.environ.get("SHAREPOINT_PASS")
-url  = os.environ.get("SHAREPOINT_FILE_URL", "")
 
-if not all([user, pwd, url]):
-    print("ERROR: One or more secrets are missing (SHAREPOINT_USER, SHAREPOINT_PASS, SHAREPOINT_FILE_URL)")
+if not all([user, pwd]):
+    print("ERROR: SHAREPOINT_USER or SHAREPOINT_PASS secret is missing.")
     sys.exit(1)
 
-# Extract base hostname e.g. https://apexfunding.sharepoint.com
-host_match = re.match(r"(https://[^/]+)", url)
-if not host_match:
-    print(f"ERROR: URL doesn't look like a SharePoint URL")
-    sys.exit(1)
+# Direct download URL for the file (using SharePoint REST API format)
+SITE    = "https://apexfunding.sharepoint.com/sites/ApexFunding"
+# Try multiple possible paths for the file
+FILE_PATHS = [
+    "/sites/ApexFunding/_api/web/GetFileByServerRelativeUrl('/sites/ApexFunding/Shared%20Documents/Loan%20Pipeline%20Checklist.xlsx')/$value",
+    "/sites/ApexFunding/_api/web/GetFileByServerRelativeUrl('/sites/ApexFunding/Shared%20Documents/General/Loan%20Pipeline%20Checklist.xlsx')/$value",
+    "/sites/ApexFunding/_api/web/GetFileByServerRelativeUrl('/sites/ApexFunding/Documents/Loan%20Pipeline%20Checklist.xlsx')/$value",
+]
 
-host = host_match.group(1)
-site_url = f"{host}/sites/ApexFunding"
+print(f"Authenticating as {user}...")
 
-print(f"Connecting to: {site_url}")
-print(f"As user: {user}")
+# Get auth digest token via SharePoint's contextinfo endpoint
+session = requests.Session()
+session.auth = (user, pwd)
 
-try:
-    credentials = UserCredential(user, pwd)
-    ctx = ClientContext(site_url).with_credentials(credentials)
+# Try form digest approach first
+ctx_resp = session.post(
+    f"{SITE}/_api/contextinfo",
+    headers={"Accept": "application/json;odata=verbose", "Content-Type": "application/json;odata=verbose"}
+)
 
-    # Try common file paths
-    paths_to_try = [
-        "/sites/ApexFunding/Shared Documents/Loan Pipeline Checklist.xlsx",
-        "/sites/ApexFunding/Shared Documents/General/Loan Pipeline Checklist.xlsx",
-        "/sites/ApexFunding/Documents/Loan Pipeline Checklist.xlsx",
-        "/sites/ApexFunding/Shared Documents/Loan%20Pipeline%20Checklist.xlsx",
-    ]
-
+if ctx_resp.status_code == 200:
+    print("Authentication successful!")
     downloaded = False
-    for path in paths_to_try:
-        try:
-            print(f"Trying: {path}")
-            f_obj = ctx.web.get_file_by_server_relative_url(path)
+    for path in FILE_PATHS:
+        url = f"https://apexfunding.sharepoint.com{path}"
+        print(f"Trying: {path.split('/')[-1]}")
+        r = session.get(url, headers={"Accept": "application/json;odata=verbose"})
+        if r.status_code == 200 and len(r.content) > 5000:
             with open("spreadsheet.xlsx", "wb") as f:
-                f_obj.download(f)
-            ctx.execute_query()
-            size = os.path.getsize("spreadsheet.xlsx")
-            if size > 5000:
-                print(f"Success! Downloaded {size:,} bytes → spreadsheet.xlsx")
-                downloaded = True
-                break
-            else:
-                print(f"  File too small ({size} bytes), trying next path...")
-        except Exception as e:
-            print(f"  Failed: {e}")
-
+                f.write(r.content)
+            print(f"Downloaded {len(r.content):,} bytes → spreadsheet.xlsx")
+            downloaded = True
+            break
+        else:
+            print(f"  Status {r.status_code}, size {len(r.content)}")
     if not downloaded:
-        print("\nERROR: Could not find spreadsheet. Trying to list available files...")
-        try:
-            folder = ctx.web.get_folder_by_server_relative_url("/sites/ApexFunding/Shared Documents")
-            files = folder.files
-            ctx.load(files)
-            ctx.execute_query()
-            print("Files in Shared Documents:")
-            for f in files:
-                print(f"  - {f.properties['Name']}")
-        except Exception as e:
-            print(f"Could not list files: {e}")
+        print("Could not find file. Listing available files...")
+        list_url = f"{SITE}/_api/web/GetFolderByServerRelativeUrl('/sites/ApexFunding/Shared Documents')/Files"
+        r = session.get(list_url, headers={"Accept": "application/json;odata=verbose"})
+        if r.status_code == 200:
+            files = r.json().get("d", {}).get("results", [])
+            print(f"Files found: {[f['Name'] for f in files]}")
         sys.exit(1)
-
-except Exception as e:
-    print(f"Connection failed: {e}")
-    print("Check that your Microsoft email and password are correct.")
+else:
+    print(f"Auth failed with status {ctx_resp.status_code}")
+    print("Note: If your account uses MFA or SSO, basic auth won't work.")
+    print("Response:", ctx_resp.text[:500])
     sys.exit(1)
