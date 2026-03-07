@@ -3,9 +3,8 @@ name: Refresh Dashboard
 on:
   schedule:
     # 9:00 AM Central Standard Time = 15:00 UTC
-    # (During Daylight Saving Time this runs at 10 AM CT — adjust to 14:00 if preferred)
     - cron: '0 15 * * 1-5'
-  workflow_dispatch:   # Adds a "Run workflow" button so you can trigger it manually anytime
+  workflow_dispatch:
 
 jobs:
   build:
@@ -21,11 +20,11 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install openpyxl
+        run: pip install openpyxl Office365-REST-Python-Client
 
       - name: Download spreadsheet from SharePoint
         env:
-          SHAREPOINT_URL: ${{ secrets.SHAREPOINT_FILE_URL }}
+          SHAREPOINT_FILE_URL: ${{ secrets.SHAREPOINT_FILE_URL }}
           SHAREPOINT_USER: ${{ secrets.SHAREPOINT_USER }}
           SHAREPOINT_PASS: ${{ secrets.SHAREPOINT_PASS }}
         run: python download_spreadsheet.py
