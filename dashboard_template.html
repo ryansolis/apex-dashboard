@@ -355,6 +355,14 @@
         <select id="pipe-lender-filter" onchange="renderPipelineTable()">
           <option value="">All Lenders</option>
         </select>
+        <select id="pipe-processor-filter" onchange="renderPipelineTable()">
+          <option value="">All Processors</option>
+        </select>
+        <select id="pipe-mtd-filter" onchange="renderPipelineTable()">
+          <option value="">All Loans</option>
+          <option value="funded_mtd">Funded MTD</option>
+          <option value="left_to_fund">Left To Fund MTD</option>
+        </select>
         <input type="text" id="pipe-search" placeholder="Search borrower…" oninput="renderPipelineTable()" style="width:180px">
       </div>
       <div class="table-wrap">
@@ -363,6 +371,7 @@
             <tr>
               <th>Borrower</th>
               <th>Loan Officer</th>
+              <th>Processor</th>
               <th>Amount</th>
               <th>Lender</th>
               <th>Purpose</th>
@@ -428,6 +437,7 @@
             <tr>
               <th>Borrower</th>
               <th>Loan Officer</th>
+              <th>Processor</th>
               <th>Amount</th>
               <th>Funded Date</th>
               <th>Lender</th>
@@ -697,6 +707,9 @@ function renderPipelineFilters() {
   const lSel = document.getElementById('pipe-lender-filter');
   loSel.innerHTML = '<option value="">All Loan Officers</option>' + los.map(l=>`<option>${l}</option>`).join('');
   lSel.innerHTML = '<option value="">All Lenders</option>' + lenders.map(l=>`<option>${l}</option>`).join('');
+  const allProcessors = [...new Set([...RAW.pipeline, ...RAW.funded2026].map(p=>p.processor||'').filter(x=>x))].sort();
+  const pSel = document.getElementById('pipe-processor-filter');
+  if (pSel) pSel.innerHTML = '<option value="">All Processors</option>' + allProcessors.map(p=>`<option>${p}</option>`).join('');
 }
 
 function renderPipeline() {
@@ -739,38 +752,70 @@ function renderPipeline() {
 }
 
 function renderPipelineTable() {
-  const lo = document.getElementById('pipe-lo-filter').value;
-  const lender = document.getElementById('pipe-lender-filter').value;
-  const search = document.getElementById('pipe-search').value.toLowerCase();
-  let data = RAW.pipeline;
-  if (lo) data = data.filter(p=>p.loan_officer===lo);
-  if (lender) data = data.filter(p=>normalizeLender(p.lender)===lender);
-  if (search) data = data.filter(p=>p.borrower.toLowerCase().includes(search));
-  const tbody = document.getElementById('pipeline-tbody');
-  if (!data.length) { tbody.innerHTML = `<tr><td colspan="10" class="empty">No loans match filters</td></tr>`; return; }
-  tbody.innerHTML = data.map(p => {
+  const lo        = document.getElementById('pipe-lo-filter').value;
+  const lender    = document.getElementById('pipe-lender-filter').value;
+  const processor = (document.getElementById('pipe-processor-filter')||{}).value || '';
+  const mtd       = (document.getElementById('pipe-mtd-filter')||{}).value || '';
+  const search    = document.getElementById('pipe-search').value.toLowerCase();
+  const today     = new Date().toISOString().slice(0,10);
+  const monthPfx  = today.slice(0,7);
+  const tbody     = document.getElementById('pipeline-tbody');
+
+  function buildRow(p, closeDate, statusBadge) {
     const fpVal = p.fast_pass ? p.fast_pass.toString().trim() : '';
     let fpBadge = `<span class="badge badge-gray">N/A</span>`;
-    if (isFastPass(p.fast_pass)) fpBadge = `<span class="badge badge-green">✓ Fast Pass</span>`;
-    else if (fpVal.toLowerCase() === 'no') fpBadge = `<span class="badge badge-amber">No</span>`;
-    const statusBadge = p.funded_date
-      ? `<span class="badge badge-green">Funded ${p.funded_date}</span>`
-      : `<span class="badge badge-amber">In Process</span>`;
-    const closeDate = p.actual_close || p.contract_close || '—';
+    if (fpVal.toLowerCase() !== 'n/a' && fpVal !== '') fpBadge = `<span class="badge badge-green">✓ Fast Pass</span>`;
+    if (fpVal.toLowerCase() === 'no') fpBadge = `<span class="badge badge-amber">No</span>`;
     return `<tr>
-      <td>${p.borrower}</td>
-      <td>${p.loan_officer}</td>
+      <td>${p.borrower}</td><td>${p.loan_officer}</td><td>${p.processor||'—'}</td>
       <td style="font-family:var(--mono)">${fmtFull(p.amount||0)}</td>
-      <td>${normalizeLender(p.lender)}</td>
-      <td>${p.purpose||''}</td>
+      <td>${normalizeLender(p.lender)}</td><td>${p.purpose||''}</td>
       <td><span class="badge badge-blue">${p.loan_type||''}</span></td>
       <td>${fpBadge}</td>
       <td style="font-family:var(--mono)">${p.rate ? p.rate.toFixed(3)+'%' : '—'}</td>
-      <td style="font-family:var(--mono)">${closeDate}</td>
-      <td>${statusBadge}</td>
+      <td>${closeDate||'—'}</td><td>${statusBadge}</td>
     </tr>`;
-  }).join('');
+  }
+
+  if (mtd === 'funded_mtd') {
+    // SOURCE: Apex Funded 2026 — already closed loans, funded this month on or before today
+    let f = RAW.funded2026.filter(p => p.funded_date && p.funded_date.startsWith(monthPfx) && p.funded_date <= today);
+    if (lo)        f = f.filter(p => p.loan_officer === lo);
+    if (lender)    f = f.filter(p => normalizeLender(p.lender) === lender);
+    if (processor) f = f.filter(p => (p.processor||'') === processor);
+    if (search)    f = f.filter(p => p.borrower.toLowerCase().includes(search));
+    tbody.innerHTML = f.length ? f.map(p => buildRow(p, '—', `<span class="badge badge-green">Funded ${p.funded_date}</span>`)).join('')
+                               : `<tr><td colspan="11" class="empty">No funded loans this month</td></tr>`;
+    return;
+  }
+
+  if (mtd === 'left_to_fund') {
+    // SOURCE: Pipeline — loans scheduled to fund later this month
+    let f = RAW.pipeline.filter(p => p.funded_date && p.funded_date.startsWith(monthPfx) && p.funded_date > today);
+    if (lo)        f = f.filter(p => p.loan_officer === lo);
+    if (lender)    f = f.filter(p => normalizeLender(p.lender) === lender);
+    if (processor) f = f.filter(p => (p.processor||'') === processor);
+    if (search)    f = f.filter(p => p.borrower.toLowerCase().includes(search));
+    tbody.innerHTML = f.length ? f.map(p => buildRow(p, p.actual_close||p.contract_close||'—', `<span class="badge badge-amber">In Process</span>`)).join('')
+                               : `<tr><td colspan="11" class="empty">No loans left to fund this month</td></tr>`;
+    return;
+  }
+
+  // All Loans — pipeline
+  let data = RAW.pipeline;
+  if (lo)        data = data.filter(p => p.loan_officer === lo);
+  if (lender)    data = data.filter(p => normalizeLender(p.lender) === lender);
+  if (processor) data = data.filter(p => (p.processor||'') === processor);
+  if (search)    data = data.filter(p => p.borrower.toLowerCase().includes(search));
+  const t2 = new Date().toISOString().slice(0,10);
+  tbody.innerHTML = data.length ? data.map(p => {
+    const status = (p.funded_date && p.funded_date <= t2)
+      ? `<span class="badge badge-green">Funded ${p.funded_date}</span>`
+      : `<span class="badge badge-amber">In Process</span>`;
+    return buildRow(p, p.actual_close||p.contract_close||'—', status);
+  }).join('') : `<tr><td colspan="11" class="empty">No loans match filters</td></tr>`;
 }
+
 
 function renderPipelineCharts(active) {
   const byLO = groupBy(active, 'loan_officer');
