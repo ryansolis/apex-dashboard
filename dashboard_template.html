@@ -274,6 +274,7 @@
 
   /* EMPTY STATE */
   .empty { text-align: center; padding: 48px; color: var(--muted); font-family: var(--mono); font-size: 13px; }
+    .totals-row td { border-top: 2px solid var(--border); font-weight:600; background: rgba(255,255,255,0.03); padding-top:0.6rem; padding-bottom:0.6rem; }
 
   /* SCROLL */
   ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -337,6 +338,13 @@
         <div class="card-title">Loan Type Mix</div>
         <div class="card-sub">2026 Funded · By Type</div>
         <div class="chart-wrap"><canvas id="chart-loan-type" height="220"></canvas></div>
+      </div>
+    </div>
+    <div class="chart-grid chart-grid-2 mt">
+      <div class="card">
+        <div class="card-title">Fast Pass Rate by Processor</div>
+        <div class="card-sub">2026 Funded · Yes vs No (excluding N/A)</div>
+        <div class="chart-wrap"><canvas id="chart-fp-processor" height="220"></canvas></div>
       </div>
     </div>
   </div>
@@ -684,6 +692,38 @@ function renderOverview() {
       </div>`;
   });
 
+  // Fast Pass Rate by Processor (Yes/No only, exclude N/A)
+  const byProcessor = groupBy(funded, 'processor');
+  const procNames = Object.keys(byProcessor).filter(p=>p).sort();
+  const procYes = procNames.map(p => byProcessor[p].filter(l => {
+    const s = (l.fast_pass||'').toString().trim().toLowerCase();
+    return s !== 'n/a' && s !== '' && s !== 'no';
+  }).length);
+  const procNo = procNames.map(p => byProcessor[p].filter(l => {
+    const s = (l.fast_pass||'').toString().trim().toLowerCase();
+    return s === 'no';
+  }).length);
+  makeChart('chart-fp-processor', {
+    type: 'bar',
+    data: {
+      labels: procNames,
+      datasets: [
+        { label: 'Yes', data: procYes, backgroundColor: '#22c55e', borderRadius: 4, borderSkipped: false },
+        { label: 'No',  data: procNo,  backgroundColor: '#f59e0b', borderRadius: 4, borderSkipped: false },
+      ]
+    },
+    options: {
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 10, padding: 12 } },
+        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.raw} loans` } }
+      },
+      scales: {
+        y: { ticks: { stepSize: 1 }, grid: { color: '#1e2740' } },
+        x: { grid: { display: false } }
+      }
+    }
+  });
+
   // Loan type donut
   const byType = groupBy(funded, 'loan_type');
   const typeNames = Object.keys(byType).sort((a,b)=>byType[b].length-byType[a].length);
@@ -786,6 +826,7 @@ function renderPipelineTable() {
     if (processor) f = f.filter(p => (p.processor||'') === processor);
     if (search)    f = f.filter(p => p.borrower.toLowerCase().includes(search));
     tbody.innerHTML = f.length ? f.map(p => buildRow(p, '—', `<span class="badge badge-green">Funded ${p.funded_date}</span>`)).join('')
+                               + (f.length ? `<tr class="totals-row"><td><strong>Total</strong></td><td><strong>${f.length} loans</strong></td><td></td><td style="font-family:var(--mono)"><strong>${fmtFull(f.reduce((s,p)=>s+(p.amount||0),0))}</strong></td><td colspan="7"></td></tr>` : '')
                                : `<tr><td colspan="11" class="empty">No funded loans this month</td></tr>`;
     return;
   }
@@ -799,6 +840,7 @@ function renderPipelineTable() {
     if (processor) f = f.filter(p => (p.processor||'') === processor);
     if (search)    f = f.filter(p => p.borrower.toLowerCase().includes(search));
     tbody.innerHTML = f.length ? f.map(p => buildRow(p, '—', `<span class="badge badge-green">Funded ${p.funded_date}</span>`)).join('')
+                               + (f.length ? `<tr class="totals-row"><td><strong>Total</strong></td><td><strong>${f.length} loans</strong></td><td></td><td style="font-family:var(--mono)"><strong>${fmtFull(f.reduce((s,p)=>s+(p.amount||0),0))}</strong></td><td colspan="7"></td></tr>` : '')
                                : `<tr><td colspan="11" class="empty">No loans funded last month</td></tr>`;
     return;
   }
@@ -811,6 +853,7 @@ function renderPipelineTable() {
     if (processor) f = f.filter(p => (p.processor||'') === processor);
     if (search)    f = f.filter(p => p.borrower.toLowerCase().includes(search));
     tbody.innerHTML = f.length ? f.map(p => buildRow(p, p.actual_close||p.contract_close||'—', `<span class="badge badge-amber">In Process</span>`)).join('')
+                               + (f.length ? `<tr class="totals-row"><td><strong>Total</strong></td><td><strong>${f.length} loans</strong></td><td></td><td style="font-family:var(--mono)"><strong>${fmtFull(f.reduce((s,p)=>s+(p.amount||0),0))}</strong></td><td colspan="7"></td></tr>` : '')
                                : `<tr><td colspan="11" class="empty">No loans left to fund this month</td></tr>`;
     return;
   }
@@ -827,7 +870,8 @@ function renderPipelineTable() {
       ? `<span class="badge badge-green">Funded ${p.funded_date}</span>`
       : `<span class="badge badge-amber">In Process</span>`;
     return buildRow(p, p.actual_close||p.contract_close||'—', status);
-  }).join('') : `<tr><td colspan="11" class="empty">No loans match filters</td></tr>`;
+  }).join('') + (data.length ? `<tr class="totals-row"><td><strong>Total</strong></td><td><strong>${data.length} loans</strong></td><td></td><td style="font-family:var(--mono)"><strong>${fmtFull(data.reduce((s,p)=>s+(p.amount||0),0))}</strong></td><td colspan="7"></td></tr>` : '')
+  : `<tr><td colspan="11" class="empty">No loans match filters</td></tr>`;
 }
 
 
@@ -938,6 +982,7 @@ function renderFundedTable() {
   data = data.sort((a,b)=>new Date(b.funded_date)-new Date(a.funded_date));
   const tbody = document.getElementById('funded-tbody');
   if (!data.length) { tbody.innerHTML=`<tr><td colspan="9" class="empty">No loans match filters</td></tr>`; return; }
+  const totalFundedAmt = data.reduce((s,d)=>s+(d.amount||0),0);
   tbody.innerHTML = data.map(d=>{
     let fpBadge=`<span class="badge badge-gray">N/A</span>`;
     if(isFastPass(d.fast_pass)) fpBadge=`<span class="badge badge-green">✓ Yes</span>`;
@@ -953,7 +998,12 @@ function renderFundedTable() {
       <td>${fpBadge}</td>
       <td style="font-family:var(--mono)">${d.rate?d.rate.toFixed(3)+'%':'—'}</td>
     </tr>`;
-  }).join('');
+  }).join('') + `<tr class="totals-row">
+    <td><strong>Total</strong></td>
+    <td><strong>${data.length} loans</strong></td>
+    <td style="font-family:var(--mono)"><strong>${fmtFull(totalFundedAmt)}</strong></td>
+    <td colspan="6"></td>
+  </tr>`;
 }
 
 function renderFundedCharts(data) {
