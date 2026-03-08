@@ -343,8 +343,8 @@
     <div class="chart-grid chart-grid-2 mt">
       <div class="card">
         <div class="card-title">Fast Pass Rate by Processor</div>
-        <div class="card-sub">2026 Funded · Yes vs No (excluding N/A)</div>
-        <div class="chart-wrap"><canvas id="chart-fp-processor" height="220"></canvas></div>
+        <div class="card-sub">2026 Funded · % Fast Passed (Yes/No only, excluding N/A)</div>
+        <div id="fastpass-processor-bars"></div>
       </div>
     </div>
   </div>
@@ -692,36 +692,28 @@ function renderOverview() {
       </div>`;
   });
 
-  // Fast Pass Rate by Processor (Yes/No only, exclude N/A)
+  // Fast Pass Rate by Processor (Yes/No only, exclude N/A) — same style as LO bars
   const byProcessor = groupBy(funded, 'processor');
   const procNames = Object.keys(byProcessor).filter(p=>p).sort();
-  const procYes = procNames.map(p => byProcessor[p].filter(l => {
-    const s = (l.fast_pass||'').toString().trim().toLowerCase();
-    return s !== 'n/a' && s !== '' && s !== 'no';
-  }).length);
-  const procNo = procNames.map(p => byProcessor[p].filter(l => {
-    const s = (l.fast_pass||'').toString().trim().toLowerCase();
-    return s === 'no';
-  }).length);
-  makeChart('chart-fp-processor', {
-    type: 'bar',
-    data: {
-      labels: procNames,
-      datasets: [
-        { label: 'Yes', data: procYes, backgroundColor: '#22c55e', borderRadius: 4, borderSkipped: false },
-        { label: 'No',  data: procNo,  backgroundColor: '#f59e0b', borderRadius: 4, borderSkipped: false },
-      ]
-    },
-    options: {
-      plugins: {
-        legend: { position: 'bottom', labels: { boxWidth: 10, padding: 12 } },
-        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.raw} loans` } }
-      },
-      scales: {
-        y: { ticks: { stepSize: 1 }, grid: { color: '#1e2740' } },
-        x: { grid: { display: false } }
-      }
-    }
+  const fpProcBars = document.getElementById('fastpass-processor-bars');
+  fpProcBars.innerHTML = '';
+  procNames.forEach((proc, i) => {
+    const loans = byProcessor[proc];
+    const eligible = loans.filter(l => {
+      const s = (l.fast_pass||'').toString().trim().toLowerCase();
+      return s !== 'n/a' && s !== '';
+    });
+    const yesN = eligible.filter(l => {
+      const s = (l.fast_pass||'').toString().trim().toLowerCase();
+      return s !== 'no';
+    }).length;
+    const pct = eligible.length ? Math.round(yesN / eligible.length * 100) : 0;
+    fpProcBars.innerHTML += `
+      <div class="prog-row">
+        <div class="prog-name">${proc}</div>
+        <div class="prog-bar-wrap"><div class="prog-bar" style="width:${pct}%;background:${PALETTE[i]}"></div></div>
+        <div class="prog-val">${pct}%</div>
+      </div>`;
   });
 
   // Loan type donut
