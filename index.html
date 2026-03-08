@@ -795,7 +795,7 @@ function renderPipelineTable() {
   if (processor) data = data.filter(p => (p.processor||'') === processor);
   if (mtd === 'left_to_fund') data = data.filter(p => p.funded_date && p.funded_date.startsWith(monthPfx) && p.funded_date > today);
   if (search)    data = data.filter(p => p.borrower.toLowerCase().includes(search));
-  const tbody = document.getElementById('pipeline-tbody');
+  tbody = document.getElementById('pipeline-tbody');
   if (!data.length) { tbody.innerHTML = `<tr><td colspan="11" class="empty">No loans match filters</td></tr>`; return; }
   tbody.innerHTML = data.map(p => {
     const fpVal = p.fast_pass ? p.fast_pass.toString().trim() : '';
