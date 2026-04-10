@@ -216,10 +216,24 @@ Manual trigger is available through `workflow_dispatch`.
 
 ## Required GitHub Secrets
 
-Set these in repository settings:
+Set these under **Settings → Secrets and variables → Actions → New repository secret**.
 
-- `SHAREPOINT_CLIENT_ID`
-- `SHAREPOINT_CLIENT_SECRET`
+### Scheduled refresh (SharePoint download)
+
+**Certificate auth (recommended for tenants that reject client-secret app-only tokens):**
+
+- `SHAREPOINT_CLIENT_ID` — Application (client) ID from the app registration.
+- `SHAREPOINT_CERT_PRIVATE_KEY_PEM` — Full PEM text of the **private key** (same content as your local `apex-dashboard-sp-private-key.pem`: includes `-----BEGIN ...-----` through `-----END ...-----`). The workflow writes this to a temp file on the runner; you do **not** set `SHAREPOINT_CERT_PATH` as a secret.
+- `SHAREPOINT_CERT_THUMBPRINT` — Thumbprint of the certificate uploaded to the app registration (hex, no spaces).
+- `SHAREPOINT_TENANT_ID` — Directory (tenant) ID **or** `yourtenant.onmicrosoft.com`.
+
+**Fallback (optional):** `SHAREPOINT_CLIENT_SECRET` — only used if `SHAREPOINT_CERT_PRIVATE_KEY_PEM` is unset or cert init fails.
+
+**Optional path tuning (same names as local `.env`):**
+
+- `SHAREPOINT_SITE_URL` — e.g. `https://apexfunding.sharepoint.com/sites/ApexFunding`
+- `SHAREPOINT_FILE_PATHS` — pipe-separated server-relative paths (e.g. `/sites/ApexFunding/Shared Documents/Apex/Resources/Loan Pipeline Checklist.xlsx`)
+- `SHAREPOINT_FILE_NAME` — override filename if different from default
 
 Optional (upload gate in the built dashboard):
 

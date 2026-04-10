@@ -31,10 +31,33 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # Certificate auth on the runner: PEM cannot live in the repo. Store the full
+      # private key (including -----BEGIN/END----- lines) in secret SHAREPOINT_CERT_PRIVATE_KEY_PEM.
+      # This step writes it to a temp file and sets SHAREPOINT_CERT_PATH for the next step.
+      - name: Prepare SharePoint certificate (optional)
+        shell: bash
+        env:
+          PEM: ${{ secrets.SHAREPOINT_CERT_PRIVATE_KEY_PEM }}
+        run: |
+          if [ -n "${PEM}" ]; then
+            printf '%s\n' "${PEM}" > "${RUNNER_TEMP}/sharepoint-cert.pem"
+            chmod 600 "${RUNNER_TEMP}/sharepoint-cert.pem"
+            echo "SHAREPOINT_CERT_PATH=${RUNNER_TEMP}/sharepoint-cert.pem" >> "${GITHUB_ENV}"
+            echo "Wrote SharePoint app cert key to runner temp (thumbprint must match Azure upload)."
+          else
+            echo "No SHAREPOINT_CERT_PRIVATE_KEY_PEM; download_spreadsheet.py will use client secret only (if set)."
+          fi
+
       - name: Download spreadsheet from SharePoint
         env:
           SHAREPOINT_CLIENT_ID: ${{ secrets.SHAREPOINT_CLIENT_ID }}
           SHAREPOINT_CLIENT_SECRET: ${{ secrets.SHAREPOINT_CLIENT_SECRET }}
+          SHAREPOINT_CERT_PATH: ${{ env.SHAREPOINT_CERT_PATH }}
+          SHAREPOINT_CERT_THUMBPRINT: ${{ secrets.SHAREPOINT_CERT_THUMBPRINT }}
+          SHAREPOINT_TENANT_ID: ${{ secrets.SHAREPOINT_TENANT_ID }}
+          SHAREPOINT_SITE_URL: ${{ secrets.SHAREPOINT_SITE_URL }}
+          SHAREPOINT_FILE_PATHS: ${{ secrets.SHAREPOINT_FILE_PATHS }}
+          SHAREPOINT_FILE_NAME: ${{ secrets.SHAREPOINT_FILE_NAME }}
         run: python download_spreadsheet.py
 
       - name: Rebuild dashboard
