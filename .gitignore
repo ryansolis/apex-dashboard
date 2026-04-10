@@ -1,0 +1,11 @@
+spreadsheet.xlsx
+tests/fixtures/minimal.xlsx
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.env.*
+certs/
+*.pfx
+*.cer

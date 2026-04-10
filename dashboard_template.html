@@ -320,31 +320,31 @@
     <div class="chart-grid chart-grid-2">
       <div class="card">
         <div class="card-title">YTD Funded Volume by Loan Officer</div>
-        <div class="card-sub">2026 · Sum of Loan Amounts</div>
+        <div class="card-sub" id="ov-sub-ytd-lo">· Sum of Loan Amounts</div>
         <div class="chart-wrap"><canvas id="chart-ytd-lo" height="220"></canvas></div>
       </div>
       <div class="card">
         <div class="card-title">Monthly Volume by Lender</div>
-        <div class="card-sub">2026 · Grouped by Month</div>
+        <div class="card-sub" id="ov-sub-month-lender">· Grouped by Month</div>
         <div class="chart-wrap"><canvas id="chart-monthly-lender" height="220"></canvas></div>
       </div>
     </div>
     <div class="chart-grid chart-grid-2 mt">
       <div class="card">
         <div class="card-title">Fast Pass Rate by Loan Officer</div>
-        <div class="card-sub">2026 Funded · % Fast Passed</div>
+        <div class="card-sub" id="ov-sub-fp-lo">Funded · % Fast Passed</div>
         <div id="fastpass-bars"></div>
       </div>
       <div class="card">
         <div class="card-title">Loan Type Mix</div>
-        <div class="card-sub">2026 Funded · By Type</div>
+        <div class="card-sub" id="ov-sub-type-mix">Funded · By Type</div>
         <div class="chart-wrap"><canvas id="chart-loan-type" height="220"></canvas></div>
       </div>
     </div>
     <div class="chart-grid chart-grid-2 mt">
       <div class="card">
         <div class="card-title">Fast Pass Rate by Processor</div>
-        <div class="card-sub">2026 Funded · % Fast Passed (Yes/No only, excluding N/A)</div>
+        <div class="card-sub" id="ov-sub-fp-proc">Funded · % Fast Passed (Yes/No only, excluding N/A)</div>
         <div id="fastpass-processor-bars"></div>
       </div>
     </div>
@@ -492,7 +492,7 @@
 <script>
 // ===================== DATA =====================
 %%LOAN_DATA%%
-
+%%UPLOAD_GATE%%
 
 // ===================== STATE =====================
 let fundedYear = 2026;
@@ -500,7 +500,38 @@ let officerYear = 2026;
 const CHARTS = {};
 
 function getFundedData(year) {
-  return year === 2026 ? RAW.funded2026 : RAW.funded2025;
+  const py = RAW.primaryYear ?? 2026;
+  return year === py ? RAW.funded2026 : RAW.funded2025;
+}
+
+/** Sync year toggle labels + defaults with data primary year (from build). */
+function syncYearControls() {
+  const py = RAW.primaryYear ?? 2026;
+  const prior = py - 1;
+  fundedYear = py;
+  officerYear = py;
+  const fcs = document.getElementById('funded-chart-sub');
+  const fls = document.getElementById('funded-lo-sub');
+  if (fcs) fcs.textContent = `${py} · By Month`;
+  if (fls) fls.textContent = String(py);
+  const ft = document.querySelectorAll('#page-funded .year-toggle .year-btn');
+  if (ft.length >= 2) {
+    ft[0].textContent = String(py);
+    ft[0].setAttribute('onclick', `setFundedYear(${py},this)`);
+    ft[1].textContent = String(prior);
+    ft[1].setAttribute('onclick', `setFundedYear(${prior},this)`);
+    ft[0].classList.add('active');
+    ft[1].classList.remove('active');
+  }
+  const ot = document.querySelectorAll('#page-officers .year-toggle .year-btn');
+  if (ot.length >= 2) {
+    ot[0].textContent = String(py);
+    ot[0].setAttribute('onclick', `setOfficerYear(${py},this)`);
+    ot[1].textContent = String(prior);
+    ot[1].setAttribute('onclick', `setOfficerYear(${prior},this)`);
+    ot[0].classList.add('active');
+    ot[1].classList.remove('active');
+  }
 }
 
 // ===================== HELPERS =====================
@@ -546,6 +577,17 @@ function normalizeLender(l) {
   return l;
 }
 
+/** Escape text before inserting into HTML (mitigates XSS from spreadsheet fields). */
+function escapeHtml(s) {
+  if (s == null || s === '') return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 const COLORS = {
   blue: '#3b82f6',
   indigo: '#6366f1',
@@ -579,6 +621,13 @@ function makeChart(id, config) {
 
 // ===================== OVERVIEW =====================
 function renderOverview() {
+  const py = RAW.primaryYear ?? 2026;
+  const setOvSub = (id, t) => { const el = document.getElementById(id); if (el) el.textContent = t; };
+  setOvSub('ov-sub-ytd-lo', `${py} · Sum of Loan Amounts`);
+  setOvSub('ov-sub-month-lender', `${py} · Grouped by Month`);
+  setOvSub('ov-sub-fp-lo', `${py} Funded · % Fast Passed`);
+  setOvSub('ov-sub-type-mix', `${py} Funded · By Type`);
+  setOvSub('ov-sub-fp-proc', `${py} Funded · % Fast Passed (Yes/No only, excluding N/A)`);
   const funded = RAW.funded2026;
   const pipe = RAW.pipeline;
   const totalFunded = sumAmt(funded);
@@ -586,13 +635,16 @@ function renderOverview() {
   const totalPipe = sumAmt(pipe);
   const fpCount = funded.filter(f=>isFastPass(f.fast_pass)).length;
   const fpPct = funded.length ? Math.round(fpCount/funded.length*100) : 0;
-  const avgRate = funded.reduce((s,v)=>s+(v.rate||0),0) / funded.filter(v=>v.rate).length;
+  const withRate = funded.filter(v=>v.rate);
+  const avgRate = withRate.length
+    ? withRate.reduce((s,v)=>s+(v.rate||0),0) / withRate.length
+    : 0;
 
   document.getElementById('kpi-overview').innerHTML = `
     <div class="kpi">
       <div class="kpi-label">YTD Funded Volume</div>
       <div class="kpi-value">${fmt(totalFunded)}</div>
-      <div class="kpi-sub">2026 · ${funded.length} loans</div>
+      <div class="kpi-sub">${py} · ${funded.length} loans</div>
     </div>
     <div class="kpi amber">
       <div class="kpi-label">In Pipeline</div>
@@ -606,11 +658,11 @@ function renderOverview() {
     </div>
     <div class="kpi purple">
       <div class="kpi-label">Avg Rate</div>
-      <div class="kpi-value">${avgRate.toFixed(3)}%</div>
-      <div class="kpi-sub">2026 funded loans</div>
+      <div class="kpi-value">${withRate.length ? avgRate.toFixed(3)+'%' : '—'}</div>
+      <div class="kpi-sub">${py} funded loans</div>
     </div>
     <div class="kpi">
-      <div class="kpi-label">Total Loans 2026</div>
+      <div class="kpi-label">Total Loans ${py}</div>
       <div class="kpi-value">${funded.length}</div>
       <div class="kpi-sub">${funded.length} funded YTD</div>
     </div>
@@ -642,14 +694,21 @@ function renderOverview() {
     }
   });
 
-  // Monthly Volume by Lender
-  const months = [1,2,3];
+  // Monthly Volume by Lender (YTD months when calendar year matches primary funded book)
+  const now = new Date();
+  const currentCalYear = now.getFullYear();
+  const overviewBookYear = py;
+  const months = currentCalYear === overviewBookYear
+    ? Array.from({ length: now.getMonth() + 1 }, (_, i) => i + 1)
+    : Array.from({ length: 12 }, (_, i) => i + 1);
   const lenderGroups = {};
   funded.forEach(f => {
     const m = getMonth(f.funded_date);
-    if (!months.includes(m)) return;
+    if (!m || !months.includes(m)) return;
     const l = normalizeLender(f.lender);
-    if (!lenderGroups[l]) lenderGroups[l] = {1:0,2:0,3:0};
+    if (!lenderGroups[l]) {
+      lenderGroups[l] = Object.fromEntries(months.map(mm => [mm, 0]));
+    }
     lenderGroups[l][m] = (lenderGroups[l][m]||0) + (f.amount||0);
   });
   const topLenders = Object.keys(lenderGroups).sort((a,b)=>
@@ -687,7 +746,7 @@ function renderOverview() {
     const pct = loans.length ? Math.round(fpN/loans.length*100) : 0;
     fpBars.innerHTML += `
       <div class="prog-row">
-        <div class="prog-name">${lo.split(' ').pop()}</div>
+        <div class="prog-name">${escapeHtml(lo.split(' ').pop())}</div>
         <div class="prog-bar-wrap"><div class="prog-bar" style="width:${pct}%;background:${PALETTE[i]}"></div></div>
         <div class="prog-val">${pct}%</div>
       </div>`;
@@ -711,7 +770,7 @@ function renderOverview() {
     const pct = eligible.length ? Math.round(yesN / eligible.length * 100) : 0;
     fpProcBars.innerHTML += `
       <div class="prog-row">
-        <div class="prog-name">${proc}</div>
+        <div class="prog-name">${escapeHtml(proc)}</div>
         <div class="prog-bar-wrap"><div class="prog-bar" style="width:${pct}%;background:${PALETTE[i]}"></div></div>
         <div class="prog-val">${pct}%</div>
       </div>`;
@@ -739,11 +798,11 @@ function renderPipelineFilters() {
   const lenders = [...new Set(RAW.pipeline.map(p=>normalizeLender(p.lender)))].sort();
   const loSel = document.getElementById('pipe-lo-filter');
   const lSel = document.getElementById('pipe-lender-filter');
-  loSel.innerHTML = '<option value="">All Loan Officers</option>' + los.map(l=>`<option>${l}</option>`).join('');
-  lSel.innerHTML = '<option value="">All Lenders</option>' + lenders.map(l=>`<option>${l}</option>`).join('');
+  loSel.innerHTML = '<option value="">All Loan Officers</option>' + los.map(l=>`<option>${escapeHtml(l)}</option>`).join('');
+  lSel.innerHTML = '<option value="">All Lenders</option>' + lenders.map(l=>`<option>${escapeHtml(l)}</option>`).join('');
   const allProcessors = [...new Set([...RAW.pipeline, ...RAW.funded2026].map(p=>p.processor||'').filter(x=>x))].sort();
   const pSel = document.getElementById('pipe-processor-filter');
-  if (pSel) pSel.innerHTML = '<option value="">All Processors</option>' + allProcessors.map(p=>`<option>${p}</option>`).join('');
+  if (pSel) pSel.innerHTML = '<option value="">All Processors</option>' + allProcessors.map(p=>`<option>${escapeHtml(p)}</option>`).join('');
 }
 
 function renderPipeline() {
@@ -751,6 +810,7 @@ function renderPipeline() {
   const totalVol = sumAmt(pipe);
   const byLO = groupBy(pipe,'loan_officer');
   const topLO = Object.entries(byLO).sort((a,b)=>sumAmt(b[1])-sumAmt(a[1]))[0];
+  const thisMonthLabel = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
 
   document.getElementById('kpi-pipeline').innerHTML = `
     <div class="kpi amber">
@@ -766,12 +826,12 @@ function renderPipeline() {
     <div class="kpi green">
       <div class="kpi-label">Top LO Pipeline</div>
       <div class="kpi-value">${topLO ? fmt(sumAmt(topLO[1])) : '—'}</div>
-      <div class="kpi-sub">${topLO ? topLO[0] : ''}</div>
+      <div class="kpi-sub">${topLO ? escapeHtml(topLO[0]) : ''}</div>
     </div>
     <div class="kpi">
       <div class="kpi-label">Funded This Month</div>
       <div class="kpi-value">${RAW.funded2026.filter(p=>p.funded_date&&p.funded_date.startsWith(new Date().toISOString().slice(0,7))).length}</div>
-      <div class="kpi-sub">March 2026</div>
+      <div class="kpi-sub">${escapeHtml(thisMonthLabel)}</div>
     </div>
     <div class="kpi purple">
       <div class="kpi-label">Avg Loan Size</div>
@@ -801,13 +861,13 @@ function renderPipelineTable() {
     if (fpVal.toLowerCase() !== 'n/a' && fpVal !== '') fpBadge = `<span class="badge badge-green">✓ Fast Pass</span>`;
     if (fpVal.toLowerCase() === 'no') fpBadge = `<span class="badge badge-amber">No</span>`;
     return `<tr>
-      <td>${p.borrower}</td><td>${p.loan_officer}</td><td>${p.processor||'—'}</td>
+      <td>${escapeHtml(p.borrower)}</td><td>${escapeHtml(p.loan_officer)}</td><td>${escapeHtml(p.processor||'—')}</td>
       <td style="font-family:var(--mono)">${fmtFull(p.amount||0)}</td>
-      <td>${normalizeLender(p.lender)}</td><td>${p.purpose||''}</td>
-      <td><span class="badge badge-blue">${p.loan_type||''}</span></td>
+      <td>${escapeHtml(normalizeLender(p.lender))}</td><td>${escapeHtml(p.purpose||'')}</td>
+      <td><span class="badge badge-blue">${escapeHtml(p.loan_type||'')}</span></td>
       <td>${fpBadge}</td>
       <td style="font-family:var(--mono)">${p.rate ? p.rate.toFixed(3)+'%' : '—'}</td>
-      <td>${closeDate||'—'}</td><td>${statusBadge}</td>
+      <td>${escapeHtml(closeDate||'—')}</td><td>${statusBadge}</td>
     </tr>`;
   }
 
@@ -818,7 +878,7 @@ function renderPipelineTable() {
     if (lender)    f = f.filter(p => normalizeLender(p.lender) === lender);
     if (processor) f = f.filter(p => (p.processor||'') === processor);
     if (search)    f = f.filter(p => p.borrower.toLowerCase().includes(search));
-    tbody.innerHTML = f.length ? f.map(p => buildRow(p, '—', `<span class="badge badge-green">Funded ${p.funded_date}</span>`)).join('')
+    tbody.innerHTML = f.length ? f.map(p => buildRow(p, '—', `<span class="badge badge-green">Funded ${escapeHtml(p.funded_date)}</span>`)).join('')
                                + (f.length ? `<tr class="totals-row"><td><strong>Total</strong></td><td><strong>${f.length} loans</strong></td><td></td><td style="font-family:var(--mono)"><strong>${fmtFull(f.reduce((s,p)=>s+(p.amount||0),0))}</strong></td><td colspan="7"></td></tr>` : '')
                                : `<tr><td colspan="11" class="empty">No funded loans this month</td></tr>`;
     return;
@@ -832,7 +892,7 @@ function renderPipelineTable() {
     if (lender)    f = f.filter(p => normalizeLender(p.lender) === lender);
     if (processor) f = f.filter(p => (p.processor||'') === processor);
     if (search)    f = f.filter(p => p.borrower.toLowerCase().includes(search));
-    tbody.innerHTML = f.length ? f.map(p => buildRow(p, '—', `<span class="badge badge-green">Funded ${p.funded_date}</span>`)).join('')
+    tbody.innerHTML = f.length ? f.map(p => buildRow(p, '—', `<span class="badge badge-green">Funded ${escapeHtml(p.funded_date)}</span>`)).join('')
                                + (f.length ? `<tr class="totals-row"><td><strong>Total</strong></td><td><strong>${f.length} loans</strong></td><td></td><td style="font-family:var(--mono)"><strong>${fmtFull(f.reduce((s,p)=>s+(p.amount||0),0))}</strong></td><td colspan="7"></td></tr>` : '')
                                : `<tr><td colspan="11" class="empty">No loans funded last month</td></tr>`;
     return;
@@ -860,7 +920,7 @@ function renderPipelineTable() {
   const t2 = new Date().toISOString().slice(0,10);
   tbody.innerHTML = data.length ? data.map(p => {
     const status = (p.funded_date && p.funded_date <= t2)
-      ? `<span class="badge badge-green">Funded ${p.funded_date}</span>`
+      ? `<span class="badge badge-green">Funded ${escapeHtml(p.funded_date)}</span>`
       : `<span class="badge badge-amber">In Process</span>`;
     return buildRow(p, p.actual_close||p.contract_close||'—', status);
   }).join('') + (data.length ? `<tr class="totals-row"><td><strong>Total</strong></td><td><strong>${data.length} loans</strong></td><td></td><td style="font-family:var(--mono)"><strong>${fmtFull(data.reduce((s,p)=>s+(p.amount||0),0))}</strong></td><td colspan="7"></td></tr>` : '')
@@ -912,7 +972,7 @@ function setFundedYear(yr, btn) {
   const data = getFundedData(yr);
   const los = [...new Set(data.map(d=>d.loan_officer))].sort();
   const loSel = document.getElementById('funded-lo-filter');
-  loSel.innerHTML = '<option value="">All Loan Officers</option>' + los.map(l=>`<option>${l}</option>`).join('');
+  loSel.innerHTML = '<option value="">All Loan Officers</option>' + los.map(l=>`<option>${escapeHtml(l)}</option>`).join('');
   renderFundedKPIs(data);
   renderFundedTable();
   renderFundedCharts(data);
@@ -922,7 +982,7 @@ function renderFunded() {
   const data = getFundedData(fundedYear);
   const los = [...new Set(data.map(d=>d.loan_officer))].sort();
   const loSel = document.getElementById('funded-lo-filter');
-  loSel.innerHTML = '<option value="">All Loan Officers</option>' + los.map(l=>`<option>${l}</option>`).join('');
+  loSel.innerHTML = '<option value="">All Loan Officers</option>' + los.map(l=>`<option>${escapeHtml(l)}</option>`).join('');
   renderFundedKPIs(data);
   renderFundedTable();
   renderFundedCharts(data);
@@ -932,7 +992,10 @@ function renderFundedKPIs(data) {
   const total = sumAmt(data);
   const fpN = data.filter(d=>isFastPass(d.fast_pass)).length;
   const fpPct = data.length ? Math.round(fpN/data.length*100) : 0;
-  const avgRate = data.filter(d=>d.rate).reduce((s,v)=>s+(v.rate||0),0) / data.filter(d=>d.rate).length;
+  const fundedWithRate = data.filter(d=>d.rate);
+  const avgRate = fundedWithRate.length
+    ? fundedWithRate.reduce((s,v)=>s+(v.rate||0),0) / fundedWithRate.length
+    : 0;
   const byLO = groupBy(data,'loan_officer');
   const topLO = Object.entries(byLO).sort((a,b)=>sumAmt(b[1])-sumAmt(a[1]))[0];
   document.getElementById('kpi-funded').innerHTML = `
@@ -949,11 +1012,11 @@ function renderFundedKPIs(data) {
     <div class="kpi amber">
       <div class="kpi-label">Top Loan Officer</div>
       <div class="kpi-value">${topLO ? fmt(sumAmt(topLO[1])) : '—'}</div>
-      <div class="kpi-sub">${topLO ? topLO[0] : ''}</div>
+      <div class="kpi-sub">${topLO ? escapeHtml(topLO[0]) : ''}</div>
     </div>
     <div class="kpi purple">
       <div class="kpi-label">Avg Rate</div>
-      <div class="kpi-value">${avgRate ? avgRate.toFixed(3)+'%' : '—'}</div>
+      <div class="kpi-value">${fundedWithRate.length ? avgRate.toFixed(3)+'%' : '—'}</div>
       <div class="kpi-sub">Funded loans</div>
     </div>
     <div class="kpi">
@@ -974,26 +1037,28 @@ function renderFundedTable() {
   if (search) data = data.filter(d=>d.borrower.toLowerCase().includes(search));
   data = data.sort((a,b)=>new Date(b.funded_date)-new Date(a.funded_date));
   const tbody = document.getElementById('funded-tbody');
-  if (!data.length) { tbody.innerHTML=`<tr><td colspan="9" class="empty">No loans match filters</td></tr>`; return; }
+  if (!data.length) { tbody.innerHTML=`<tr><td colspan="10" class="empty">No loans match filters</td></tr>`; return; }
   const totalFundedAmt = data.reduce((s,d)=>s+(d.amount||0),0);
   tbody.innerHTML = data.map(d=>{
     let fpBadge=`<span class="badge badge-gray">N/A</span>`;
     if(isFastPass(d.fast_pass)) fpBadge=`<span class="badge badge-green">✓ Yes</span>`;
     else if((d.fast_pass||'').toString().trim().toLowerCase()==='no') fpBadge=`<span class="badge badge-amber">No</span>`;
     return `<tr>
-      <td>${d.borrower}</td>
-      <td>${d.loan_officer}</td>
+      <td>${escapeHtml(d.borrower)}</td>
+      <td>${escapeHtml(d.loan_officer)}</td>
+      <td>${escapeHtml(d.processor||'—')}</td>
       <td style="font-family:var(--mono)">${fmtFull(d.amount||0)}</td>
-      <td style="font-family:var(--mono)">${d.funded_date||'—'}</td>
-      <td>${normalizeLender(d.lender)}</td>
-      <td>${d.purpose||''}</td>
-      <td><span class="badge badge-blue">${d.loan_type||''}</span></td>
+      <td style="font-family:var(--mono)">${escapeHtml(d.funded_date||'—')}</td>
+      <td>${escapeHtml(normalizeLender(d.lender))}</td>
+      <td>${escapeHtml(d.purpose||'')}</td>
+      <td><span class="badge badge-blue">${escapeHtml(d.loan_type||'')}</span></td>
       <td>${fpBadge}</td>
       <td style="font-family:var(--mono)">${d.rate?d.rate.toFixed(3)+'%':'—'}</td>
     </tr>`;
   }).join('') + `<tr class="totals-row">
     <td><strong>Total</strong></td>
     <td><strong>${data.length} loans</strong></td>
+    <td></td>
     <td style="font-family:var(--mono)"><strong>${fmtFull(totalFundedAmt)}</strong></td>
     <td colspan="6"></td>
   </tr>`;
@@ -1079,7 +1144,7 @@ function renderOfficers() {
     return `<div class="card" style="border-top:2px solid ${color}">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
         <div>
-          <div style="font-size:16px;font-weight:700">${lo}</div>
+          <div style="font-size:16px;font-weight:700">${escapeHtml(lo)}</div>
           <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:2px">${loans.length} loans funded · ${sharePct}% of volume</div>
         </div>
         <div style="text-align:right">
@@ -1110,7 +1175,7 @@ function renderOfficers() {
       </div>
       <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px">Top Lenders</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
-        ${topLenders.map(([l,n])=>`<span class="badge badge-blue">${l} (${n})</span>`).join('')}
+        ${topLenders.map(([l,n])=>`<span class="badge badge-blue">${escapeHtml(l)} (${n})</span>`).join('')}
       </div>
     </div>`;
   }).join('');
@@ -1145,10 +1210,19 @@ function showNotice(msg, color, duration) {
 }
 
 function parseDate(v) {
-  if (!v) return null;
+  if (v == null || v === '') return null;
   if (v instanceof Date) return v.toISOString().slice(0,10);
   const s = v.toString().trim();
+  if (!s) return null;
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  if (/\d{1,2}\/\d{1,2}\/\d{4}/.test(s)) {
+    const p = s.split('/');
+    if (p.length === 3) return `${p[2]}-${p[0].padStart(2,'0')}-${p[1].padStart(2,'0')}`;
+  }
+  if (typeof v === 'number' && v > 1 && v < 1000000) {
+    const d = new Date(Math.round((v - 25569) * 86400 * 1000));
+    return isNaN(d) ? null : d.toISOString().slice(0,10);
+  }
   if (!isNaN(s) && s.length < 6) {
     const d = new Date(Math.round((parseFloat(s) - 25569) * 86400 * 1000));
     return isNaN(d) ? null : d.toISOString().slice(0,10);
@@ -1172,7 +1246,7 @@ function readPipelineSheet(ws) {
     lender:         (r['Lender']||'').toString().trim(),
     purpose:        (r['Purpose']||'').toString().trim(),
     loan_type:      (r['Loan Type']||'').toString().trim(),
-    processor:      (r['Processor']||'').toString().trim(),
+    processor:      (r['Processor']||r['Loan Processor']||'').toString().trim(),
     loa:            (r['LOA']||'').toString().trim(),
     contract_close: parseDate(r['Contract Close Date']),
     actual_close:   parseDate(r['Actual Close Date']),
@@ -1191,110 +1265,52 @@ function readFundedSheet(ws) {
     lender:       (r['Lender']||'').toString().trim(),
     purpose:      (r['Purpose']||'').toString().trim(),
     loan_type:    (r['Loan Type']||'').toString().trim(),
-    processor:    (r['Processor']||'').toString().trim(),
+    processor:    (r['Processor']||r['Loan Processor']||'').toString().trim(),
     funded_date:  parseDate(r['Funded Date']),
     rate:         parseFloat(r['Interest Rate'])||0,
   })).filter(r => r.borrower && r.amount);
 }
 
-// Token stored in sessionStorage — never baked into HTML
-function getGitHubToken() {
-  return sessionStorage.getItem('apex_gh_token') || '';
-}
+const UPLOAD_SESSION_KEY = 'apex_upload_ok';
 
-function promptForToken() {
+/** Optional gate: set at build time via build_dashboard.py + DASHBOARD_UPLOAD_USER / DASHBOARD_UPLOAD_PASSWORD. */
+async function ensureUploadAuth() {
+  if (!window.__UPLOAD_GATE__) return true;
+  if (sessionStorage.getItem(UPLOAD_SESSION_KEY) === '1') return true;
+  const g = window.__UPLOAD_GATE__;
   return new Promise(resolve => {
-    // Build modal
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center';
-    overlay.innerHTML = `
-      <div style="background:#1a1f2e;border:1px solid #334155;border-radius:12px;padding:32px;width:420px;font-family:var(--mono)">
-        <div style="font-size:14px;font-weight:700;color:#e2e8f0;margin-bottom:8px">🔑 GitHub Token Required</div>
-        <div style="font-size:11px;color:#94a3b8;margin-bottom:20px;line-height:1.6">
-          To push data updates to the live dashboard, enter your GitHub personal access token.<br><br>
-          <strong style="color:#e2e8f0">One-time per session</strong> — it won't be saved permanently.
-        </div>
-        <input id="gh-token-input" type="password" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-          style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:10px 12px;border-radius:6px;font-family:var(--mono);font-size:12px;outline:none;margin-bottom:16px">
-        <div style="display:flex;gap:10px;justify-content:flex-end">
-          <button id="gh-token-cancel" style="background:none;border:1px solid #334155;color:#94a3b8;padding:8px 18px;border-radius:6px;cursor:pointer;font-family:var(--mono);font-size:11px">Cancel</button>
-          <button id="gh-token-ok" style="background:#3b82f6;border:none;color:white;padding:8px 18px;border-radius:6px;cursor:pointer;font-family:var(--mono);font-size:11px;font-weight:700">Save & Continue</button>
-        </div>
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#1a1f2e;border:1px solid #334155;border-radius:12px;padding:32px;width:420px;font-family:var(--mono)';
+    box.innerHTML = `
+      <div style="font-size:14px;font-weight:700;color:#e2e8f0;margin-bottom:8px">Upload access</div>
+      <div style="font-size:11px;color:#94a3b8;margin-bottom:16px;line-height:1.6">Uploader username and password (session only). This does not publish to the live site &mdash; scheduled refresh deploys updates for everyone.</div>
+      <input id="up-user" type="text" autocomplete="username" placeholder="Username" style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:10px 12px;border-radius:6px;font-family:var(--mono);font-size:12px;margin-bottom:10px;outline:none">
+      <input id="up-pass" type="password" autocomplete="current-password" placeholder="Password" style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:10px 12px;border-radius:6px;font-family:var(--mono);font-size:12px;margin-bottom:16px;outline:none">
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button id="up-cancel" type="button" style="background:none;border:1px solid #334155;color:#94a3b8;padding:8px 18px;border-radius:6px;cursor:pointer;font-family:var(--mono);font-size:11px">Cancel</button>
+        <button id="up-ok" type="button" style="background:#3b82f6;border:none;color:white;padding:8px 18px;border-radius:6px;cursor:pointer;font-family:var(--mono);font-size:11px;font-weight:700">Continue</button>
       </div>`;
+    overlay.appendChild(box);
     document.body.appendChild(overlay);
-    const input = overlay.querySelector('#gh-token-input');
-    input.focus();
-    overlay.querySelector('#gh-token-cancel').onclick = () => { overlay.remove(); resolve(null); };
-    overlay.querySelector('#gh-token-ok').onclick = () => {
-      const t = input.value.trim();
-      if (t) sessionStorage.setItem('apex_gh_token', t);
-      overlay.remove();
-      resolve(t || null);
+    const uEl = box.querySelector('#up-user');
+    const pEl = box.querySelector('#up-pass');
+    uEl.focus();
+    const finish = (ok) => { overlay.remove(); resolve(ok); };
+    box.querySelector('#up-cancel').onclick = () => finish(false);
+    const submit = () => {
+      if (uEl.value.trim() === g.user && pEl.value === g.password) {
+        sessionStorage.setItem(UPLOAD_SESSION_KEY, '1');
+        finish(true);
+      } else {
+        showNotice('Invalid username or password', '#ef4444', 5000);
+      }
     };
-    input.addEventListener('keydown', e => { if (e.key === 'Enter') overlay.querySelector('#gh-token-ok').click(); });
+    box.querySelector('#up-ok').onclick = submit;
+    pEl.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+    uEl.addEventListener('keydown', e => { if (e.key === 'Enter') pEl.focus(); });
   });
-}
-
-async function commitToGitHub(newRaw, filename, token) {
-  const OWNER = 'smithjoshuab-droid';
-  const REPO  = 'dashboard';
-  const FILE  = 'index.html';
-  const API   = `https://api.github.com/repos/${OWNER}/${REPO}/contents/${FILE}`;
-  const HDR   = { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json' };
-
-  // 1. Get current SHA + content
-  const meta = await fetch(API, { headers: HDR });
-  if (!meta.ok) {
-    if (meta.status === 401) throw new Error('Invalid token — please re-enter your GitHub token next upload.');
-    throw new Error(`GitHub API error: ${meta.status}`);
-  }
-  const { sha, content: encoded } = await meta.json();
-
-  // 2. Decode current index.html
-  const currentHtml = decodeURIComponent(escape(atob(encoded.replace(/\n/g,''))));
-
-  // 3. Build refreshed timestamp
-  const refreshed = new Date().toLocaleString('en-US', {
-    month:'long', day:'numeric', year:'numeric',
-    hour:'numeric', minute:'2-digit', hour12:true
-  });
-
-  // 4. Replace the DATA block in-place
-  const MARKER_START = '// ===================== DATA =====================';
-  const MARKER_END   = '// ===================== STATE ===';
-  const dataStart = currentHtml.indexOf(MARKER_START);
-  const dataEnd   = currentHtml.indexOf(MARKER_END);
-  if (dataStart === -1 || dataEnd === -1) throw new Error('Could not locate DATA markers in index.html');
-
-  const dataObj = { pipeline: newRaw.pipeline, funded2026: newRaw.funded2026, funded2025: newRaw.funded2025, refreshed };
-  const newDataJs = `const RAW = ${JSON.stringify(dataObj)};`;
-  let newHtml = currentHtml.slice(0, dataStart) + MARKER_START + '\n' + newDataJs + '\n\n\n' + currentHtml.slice(dataEnd);
-
-  // 5. Update the visible "Updated …" timestamp in header
-  newHtml = newHtml.replace(
-    /(Updated )[A-Za-z]+ \d+, \d{4} at \d+:\d+ [AP]M/,
-    `$1${refreshed}`
-  );
-
-  // 6. Commit
-  const push = await fetch(API, {
-    method: 'PUT',
-    headers: { ...HDR, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      message: `Data refresh via Upload — ${filename} (${refreshed})`,
-      content: btoa(unescape(encodeURIComponent(newHtml))),
-      sha,
-    }),
-  });
-  if (!push.ok) {
-    const err = await push.json().catch(()=>({}));
-    if (push.status === 401) {
-      sessionStorage.removeItem('apex_gh_token');
-      throw new Error('Token rejected — please try uploading again to re-enter it.');
-    }
-    throw new Error(`GitHub commit failed (${push.status}): ${err.message||''}`);
-  }
-  return refreshed;
 }
 
 async function handleFileUpload(input) {
@@ -1302,53 +1318,58 @@ async function handleFileUpload(input) {
   if (!file) return;
   input.value = '';
 
-  // Get or prompt for token
-  let token = getGitHubToken();
-  if (!token) {
-    token = await promptForToken();
-    if (!token) return; // user cancelled
-  }
+  if (!(await ensureUploadAuth())) return;
 
   const reader = new FileReader();
-  reader.onload = async function(e) {
-    const loadingNotice = showNotice('⏳ Parsing spreadsheet…', '#6366f1', 60000);
+  reader.onload = function(e) {
+    const loadingNotice = showNotice('Parsing spreadsheet…', '#6366f1', 60000);
     try {
       const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array', cellDates:false});
 
-      const pipelineWS = wb.Sheets['Loan Pipeline'];
-      const funded26WS = wb.Sheets['Apex Funded 2026'];
-      const funded25WS = wb.Sheets['Apex Funded 2025'];
+      const meta = RAW.meta || {};
+      const pipeName = meta.sheetLoanPipeline || 'Loan Pipeline';
+      const fundPriName = meta.sheetFundedPrimary || 'Apex Funded 2026';
+      const fundPriorName = meta.sheetFundedPrior || 'Apex Funded 2025';
+      const pipelineWS = wb.Sheets[pipeName];
+      const fundedPriWS = wb.Sheets[fundPriName];
+      const fundedPriorWS = wb.Sheets[fundPriorName];
 
-      if (!pipelineWS || !funded26WS) {
+      if (!pipelineWS || !fundedPriWS) {
         loadingNotice.remove();
-        showNotice('✗ Missing sheets — need "Loan Pipeline" and "Apex Funded 2026"', '#ef4444', 7000);
+        showNotice(`Missing sheets — need "${pipeName}" and "${fundPriName}"`, '#ef4444', 7000);
         return;
       }
 
       const newRaw = {
         pipeline:   readPipelineSheet(pipelineWS),
-        funded2026: readFundedSheet(funded26WS),
-        funded2025: funded25WS ? readFundedSheet(funded25WS) : [],
+        funded2026: readFundedSheet(fundedPriWS),
+        funded2025: fundedPriorWS ? readFundedSheet(fundedPriorWS) : [],
       };
 
-      // Update local view immediately
       RAW.pipeline   = newRaw.pipeline;
       RAW.funded2026 = newRaw.funded2026;
       RAW.funded2025 = newRaw.funded2025;
+      if (!RAW.meta) RAW.meta = meta;
+      if ('refreshed' in RAW) {
+        RAW.refreshed = new Date().toLocaleString('en-US', {
+          month:'long', day:'numeric', year:'numeric',
+          hour:'numeric', minute:'2-digit', hour12:true
+        });
+      }
       const activeNav = document.querySelector('.nav-tab.active');
-      showPage(activeNav ? activeNav.textContent.trim().toLowerCase() : 'overview');
+      const navRaw = activeNav ? activeNav.getAttribute('onclick') || '' : '';
+      const m = navRaw.match(/showPage\('([^']+)'\)/);
+      showPage(m ? m[1] : 'overview');
 
-      // Push to GitHub
-      loadingNotice.textContent = '⏳ Publishing to live dashboard…';
-      const refreshed = await commitToGitHub(newRaw, file.name, token);
       loadingNotice.remove();
       showNotice(
-        `✓ Live dashboard updated for everyone — ${newRaw.pipeline.length} pipeline · ${newRaw.funded2026.length} funded 2026`,
-        '#10b981', 7000
+        `Preview updated in this browser (${newRaw.pipeline.length} pipeline · ${newRaw.funded2026.length} funded ${RAW.primaryYear ?? 'primary'}). Live site updates on the scheduled workflow only.`,
+        '#10b981',
+        9000
       );
     } catch(err) {
       loadingNotice.remove();
-      showNotice('✗ ' + err.message, '#ef4444', 8000);
+      showNotice(err.message || 'Upload failed', '#ef4444', 8000);
       console.error('Upload error:', err);
     }
   };
@@ -1358,6 +1379,7 @@ async function handleFileUpload(input) {
 
 
 // ===================== INIT =====================
+syncYearControls();
 renderOverview();
 </script>
 </body>

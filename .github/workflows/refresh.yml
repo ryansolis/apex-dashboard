@@ -1,12 +1,15 @@
 name: Refresh Dashboard
 
+permissions:
+  contents: write
+
 on:
   schedule:
-    # 9:00 AM CST = 15:00 UTC
+    # Target "office" times in America/Chicago. GitHub Actions uses UTC only:
+    # - Winter (CST): 9/12/4 PM local = 15:00 / 18:00 / 22:00 UTC (as below)
+    # - Summer (CDT): same local clocks = 14:00 / 19:00 / 21:00 UTC — adjust crons when DST matters.
     - cron: '0 15 * * 1-5'
-    # 12:00 PM CST = 18:00 UTC
     - cron: '0 18 * * 1-5'
-    # 4:00 PM CST = 22:00 UTC
     - cron: '0 22 * * 1-5'
   workflow_dispatch:
 
@@ -17,6 +20,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -24,7 +29,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install openpyxl Office365-REST-Python-Client
+        run: pip install -r requirements.txt
 
       - name: Download spreadsheet from SharePoint
         env:
@@ -33,6 +38,9 @@ jobs:
         run: python download_spreadsheet.py
 
       - name: Rebuild dashboard
+        env:
+          DASHBOARD_UPLOAD_USER: ${{ secrets.DASHBOARD_UPLOAD_USER }}
+          DASHBOARD_UPLOAD_PASSWORD: ${{ secrets.DASHBOARD_UPLOAD_PASSWORD }}
         run: python build_dashboard.py
 
       - name: Commit updated dashboard
@@ -40,5 +48,31 @@ jobs:
           git config user.name "Dashboard Bot"
           git config user.email "dashboard-bot@users.noreply.github.com"
           git add index.html
-          git diff --staged --quiet || git commit -m "Dashboard refresh $(date +'%Y-%m-%d %H:%M')"
-          git push
+          if git diff --staged --quiet; then
+            echo "No changes to index.html"
+            exit 0
+          fi
+          git commit -m "Dashboard refresh $(date +'%Y-%m-%d %H:%M')"
+          ok=0
+          for i in 1 2 3; do
+            git pull --rebase --autostash origin "${{ github.ref_name }}" && git push && ok=1 && break
+            echo "Push attempt $i failed; retrying in 25s…"
+            sleep 25
+          done
+          if [ "$ok" != 1 ]; then
+            echo "git push failed after 3 attempts"
+            exit 1
+          fi
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -n "${SLACK_WEBHOOK_URL:-}" ]; then
+            curl -sS -X POST -H 'Content-type: application/json' \
+              --data "{\"text\":\"Dashboard refresh failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+              "$SLACK_WEBHOOK_URL" || true
+          else
+            echo "No SLACK_WEBHOOK_URL secret; skipping notification"
+          fi

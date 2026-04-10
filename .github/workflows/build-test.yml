@@ -1,0 +1,33 @@
+name: Test dashboard build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Create fixture workbook
+        run: python tests/fixtures/build_minimal_xlsx.py
+
+      - name: Build index.html from fixture
+        run: python build_dashboard.py --spreadsheet tests/fixtures/minimal.xlsx
+
+      - name: Smoke check output
+        run: |
+          test -f index.html
+          grep -q 'const RAW =' index.html
+          grep -q '"primaryYear"' index.html
+          grep -q 'chart-ytd-lo' index.html
